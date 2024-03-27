@@ -7,4 +7,3 @@ edition = "2021"
 
 [dependencies]
 binary-layout = "4.0.1"
-packed_struct = "0.10.1"
