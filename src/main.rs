@@ -22,14 +22,14 @@
 
 
 use core::str;
-use std::{fs::File, io::{BufReader, BufWriter, Write}, net::UdpSocket, os::unix::process};
+use std::{fs::File, io::{BufReader, BufWriter, Read, Write}, net::UdpSocket};
 use bitter::{BigEndianReader, BitReader};
-use log::{debug, error, info, max_level, trace, LevelFilter};
+use log::{ error, info, max_level, trace, LevelFilter};
 use simple_logger;
 
 // const PORT_WII_MSG: u16 = 50010;
-const PORT_WII_VID: u16 = 50120;
-// const PORT_WII_AUD: u16 = 50121;
+const PORT_WUP_VID: u16 = 50120;
+const PORT_WUP_AUD: u16 = 50121;
 // const PORT_WII_HID: u16 = 50122;
 // const PORT_WII_CMD: u16 = 50123;
 
@@ -54,7 +54,7 @@ const PORT_WII_VID: u16 = 50120;
 // });
 
 #[derive(Debug)]
-struct WiiUPacket {
+struct WiiUVideoPacket {
     magic: u8,
     packet_type: u8,
     seq_id: u16,
@@ -69,13 +69,20 @@ struct WiiUPacket {
     payload: Vec<u8>
 }
 
-fn get_vid_socket(ip: &str) -> Result<UdpSocket, std::io::Error> {
-    let bindaddr = format!("{}:{}", ip, PORT_WII_VID);
-
-    return UdpSocket::bind(bindaddr);
+fn get_socket(dest_ip: &str, port: u16) -> Result<UdpSocket, std::io::Error> {
+    let addr = format!("{}:{}", dest_ip, port);
+    return UdpSocket::bind(addr);
 }
 
-fn process_video_packet(packet: &[u8]) -> Option<WiiUPacket> {
+fn get_vid_socket(dest_ip: &str) -> Result<UdpSocket, std::io::Error> {
+    return get_socket(dest_ip, PORT_WUP_VID);
+}
+
+fn get_aud_socket(dest_ip: &str) -> Result<UdpSocket, std::io::Error> {
+    return get_socket(dest_ip, PORT_WUP_AUD);
+}
+
+fn process_video_packet(packet: &[u8]) -> Option<WiiUVideoPacket> {
     let mut bits = BigEndianReader::new(&packet);
 
     let len = bits.refill_lookahead();
@@ -97,24 +104,12 @@ fn process_video_packet(packet: &[u8]) -> Option<WiiUPacket> {
 
     // next 32 bits regard what this video packet looks like
     let init = bits.peek(1) != 0;
-    if init {
-        debug!("init!");
-    }
     bits.consume(1);
     let frame_begin = bits.peek(1) != 0;
-    if frame_begin {
-        debug!("frame_begin!");
-    }
     bits.consume(1);
     let chunk_end = bits.peek(1) != 0;
-    if chunk_end {
-        debug!("chunk_end!");
-    }
     bits.consume(1);
     let frame_end = bits.peek(1) != 0;
-    if frame_end {
-        debug!("frame_end!");
-    }
     bits.consume(1);
     let has_timestamp = bits.peek(1) != 0;
     assert!(has_timestamp, "Packet with no timestamp");
@@ -170,7 +165,7 @@ fn process_video_packet(packet: &[u8]) -> Option<WiiUPacket> {
         trace!("Read {payload_len:?} bytes, expected {expected_payload_size_bytes}");
     }
 
-    return Some(WiiUPacket{
+    return Some(WiiUVideoPacket{
         magic: magic,
         packet_type: packet_type,
         seq_id: seq_id,
@@ -186,13 +181,14 @@ fn process_video_packet(packet: &[u8]) -> Option<WiiUPacket> {
     })
 }
 
-fn main() -> std::io::Result<()>{
-    simple_logger::init_with_env().unwrap();
+fn writer_main() -> std::io::Result<()>{
     {
         //TODO: Bind to the appropriate IP address (It's usually 192.168.1.11 but could be different)
         let video_socket = get_vid_socket("0.0.0.0")?;
 
-        for _n in 1..=1000 {
+        let mut file_writer = BufWriter::new(File::create("video_packets")?);
+
+        for _n in 1..=10000 {
             // The max size is really 2017 bytes, but bitter prefers
             // reading 64 bit chunks so we'll fill all the way to 2048
             let mut buf = [0u8; 2048];
@@ -202,6 +198,33 @@ fn main() -> std::io::Result<()>{
             // have at least a single-byte payload.
             if amt < 17 {
                 info!("Packet from {src} was too short at only {amt} bytes");
+                continue;
+            }
+
+            file_writer.write(&buf)?;
+        }
+    Ok(())
+    }
+}
+
+fn main() -> std::io::Result<()>{
+    simple_logger::init_with_env().unwrap();
+    {
+        //TODO: Bind to the appropriate IP address (It's usually 192.168.1.11 but could be different)
+        // let video_socket = get_vid_socket("0.0.0.0")?;
+
+        let mut file_reader = BufReader::new(File::open("video_packets")?);
+
+        for _n in 1..=1000 {
+            // The max size is really 2017 bytes, but bitter prefers
+            // reading 64 bit chunks so we'll fill all the way to 2048
+            let mut buf = [0u8; 2048];
+            let amt = file_reader.read(&mut buf)?;
+
+            // The WUP datagram has a 16 byte header and should always
+            // have at least a single-byte payload.
+            if amt < 17 {
+                info!("Packet was too short at only {amt} bytes");
                 continue;
             }
 
