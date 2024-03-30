@@ -2,8 +2,13 @@
 name = "drc-sim-rust"
 version = "0.1.0"
 edition = "2021"
+default-run = "drc-sim-rust"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "drc_sim_rust_lib"
+path = "src/lib.rs"
 
 [dependencies]
 bitter = "0.6.2"
