@@ -14,3 +14,6 @@ path = "src/lib.rs"
 bitter = "0.6.2"
 log = { version = "0.4.21", features = ["std"] }
 simple_logger = "4.3.3"
+
+[dev-dependencies]
+assert_matches = "1.5.0"
