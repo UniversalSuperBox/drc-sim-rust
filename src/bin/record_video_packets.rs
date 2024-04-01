@@ -4,7 +4,7 @@
 // This program records ten thousand packets to a file called
 // video_packets in your current directory.
 
-use drc_sim_rust_lib::sockets;
+use drc_sim_rust_lib::{sockets, WUP_VID_PACKET_BUFFER_SIZE};
 
 use std::{
     fs::File,
@@ -22,20 +22,13 @@ fn main() -> std::io::Result<()> {
 
         let mut file_writer = BufWriter::new(File::create_new("video_packets")?);
 
-        for _n in 1..=10000 {
-            // 2063 is the maximum theoretical size of the WUP video
-            // packet
-            let mut buf = [0u8; 2063];
-            let (amt, src) = video_socket.recv_from(&mut buf)?;
+        for n in 0..10000 {
+            let mut buf = [0u8; WUP_VID_PACKET_BUFFER_SIZE];
+            video_socket.recv_from(&mut buf)?;
 
-            // The WUP video datagram has a 16 byte header and should
-            // always have at least a single-byte payload.
-            if amt < 17 {
-                info!("Packet from {src} was too short at only {amt} bytes, skipping.");
-                continue;
-            }
-
-            file_writer.write(&buf)?;
+            let written = file_writer.write(&buf)?;
+            assert!(written == WUP_VID_PACKET_BUFFER_SIZE);
+            info!("{}", n);
         }
         Ok(())
     }

@@ -4,6 +4,7 @@
 use drc_sim_rust_lib::incoming_packet_parser;
 use drc_sim_rust_lib::sockets;
 
+use drc_sim_rust_lib::WUP_VID_PACKET_BUFFER_SIZE;
 use log::{error, trace};
 
 fn main() -> std::io::Result<()> {
@@ -14,9 +15,7 @@ fn main() -> std::io::Result<()> {
         let video_socket = sockets::get_vid_socket("0.0.0.0")?;
 
         loop {
-            // 2063 is the maximum theoretical size of the WUP video
-            // packet
-            let mut buf = [0u8; 2063];
+            let mut buf = [0u8; WUP_VID_PACKET_BUFFER_SIZE];
             video_socket.recv_from(&mut buf)?;
 
             let packet = match incoming_packet_parser::process_video_packet(&buf) {
