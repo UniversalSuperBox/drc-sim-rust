@@ -2,7 +2,7 @@
 #[macro_use]
 extern crate assert_matches;
 
-use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WiiUVideoPacket};
+use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
 
 #[test]
 fn christmas_tree_video_packet() {
@@ -16,7 +16,7 @@ fn christmas_tree_video_packet() {
     ];
     assert_matches!(
         process_video_packet(&packet),
-        Some(WiiUVideoPacket {
+        Some(WUPVideoPacket {
             magic: 0xF,
             packet_type: 0,
             seq_id: 0x3FF,

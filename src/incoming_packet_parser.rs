@@ -9,7 +9,7 @@ use core::fmt;
 use bitter::{BigEndianReader, BitReader};
 use log::{error, max_level, trace, LevelFilter};
 
-pub struct WiiUVideoPacket<'a> {
+pub struct WUPVideoPacket<'a> {
     pub magic: u8,                // 4
     pub packet_type: u8,          // 2
     pub seq_id: u16,              // 10 (16b/2B)
@@ -26,7 +26,7 @@ pub struct WiiUVideoPacket<'a> {
                                   // sends dgrams that large)
 }
 
-impl fmt::Debug for WiiUVideoPacket<'_> {
+impl fmt::Debug for WUPVideoPacket<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Point")
             .field("magic", &self.magic)
@@ -48,7 +48,7 @@ impl fmt::Debug for WiiUVideoPacket<'_> {
     }
 }
 
-pub fn process_video_packet(packet: &[u8]) -> Option<WiiUVideoPacket> {
+pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
     let mut bits = BigEndianReader::new(&packet);
 
     if packet.len() < 17 {
@@ -107,7 +107,7 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WiiUVideoPacket> {
 
     let payload = &packet[16..];
 
-    return Some(WiiUVideoPacket {
+    return Some(WUPVideoPacket {
         magic: magic,
         packet_type: packet_type,
         seq_id: seq_id,
