@@ -10,8 +10,14 @@ process_video_packet.
 I have no idea whether this will work on big-endian systems.
 */
 fn data_from_wupvideopacket(input: WUPVideoPacket) -> Vec<u8> {
-    assert!(input.seq_id <= 1023, "seq_id is only a 10-bit number on the wire.");
-    assert!(input.payload_size <= 2047, "payload_size is only an 11-bit number on the wire.");
+    assert!(
+        input.seq_id <= 1023,
+        "seq_id is only a 10-bit number on the wire."
+    );
+    assert!(
+        input.payload_size <= 2047,
+        "payload_size is only an 11-bit number on the wire."
+    );
 
     let mut data: Vec<u8> = Vec::new();
     let seq_id = input.seq_id.to_be_bytes();
@@ -23,7 +29,12 @@ fn data_from_wupvideopacket(input: WUPVideoPacket) -> Vec<u8> {
     data.push(seq_id[1]);
 
     let payload_size = input.payload_size.to_be_bytes();
-    let third_byte = ((input.init as u8 ) << 7) | ((input.frame_begin as u8) << 6) | ((input.chunk_end as u8) << 5) | ((input.frame_end as u8) << 4) | ((input.has_timestamp as u8) << 3) | payload_size[0];
+    let third_byte = ((input.init as u8) << 7)
+        | ((input.frame_begin as u8) << 6)
+        | ((input.chunk_end as u8) << 5)
+        | ((input.frame_end as u8) << 4)
+        | ((input.has_timestamp as u8) << 3)
+        | payload_size[0];
     data.push(third_byte);
 
     data.push(payload_size[1]);
@@ -88,7 +99,10 @@ fn test_data_from_wupvideopacket_ones() {
 fn test_data_from_wupvideopacket_christmastree() {
     assert_eq!(
         data_from_wupvideopacket(CHRISTMAS_TREE_PKT),
-        [0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [
+            0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF
+        ]
     );
 }
 
