@@ -9,7 +9,7 @@ use core::fmt;
 use bitter::{BigEndianReader, BitReader};
 use log::{error, max_level, trace, LevelFilter};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct WUPVideoPacket<'a> {
     pub magic: u8,                // 4
     pub packet_type: u8,          // 2

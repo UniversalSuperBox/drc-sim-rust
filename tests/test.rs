@@ -1,7 +1,3 @@
-#[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
-
 use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
 
 /** Converts a WUPVideoPacket into big-endian bytes as parsed by
@@ -112,4 +108,19 @@ fn christmas_tree_video_packet() {
         process_video_packet(&CHRISTMAS_TREE_SLICE),
         Some(CHRISTMAS_TREE_PKT)
     );
+}
+
+#[test]
+fn test_data_from_wupvideopacket_magic() {
+    for i in 0..15 {
+        let mut packet = ONES.clone();
+        packet.magic = i;
+        let first_byte = i << 4;
+        assert_eq!(
+            data_from_wupvideopacket(packet),
+            [
+                first_byte, 1, 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1
+            ]
+        )
+    }
 }
