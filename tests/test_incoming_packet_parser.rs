@@ -129,10 +129,7 @@ fn fail_with_invalid_magic() {
 fn fail_with_invalid_type() {
     let mut packet = CHRISTMAS_TREE_SLICE.clone();
     packet[0] = 0xF8;
-    assert_eq!(
-        process_video_packet(&packet),
-        None
-    );
+    assert_eq!(process_video_packet(&packet), None);
 }
 
 // I'm mostly using this to learn about property-based testing... given
@@ -173,9 +170,24 @@ fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
         assert_eq!(
             data_from_wupvideopacket(packet).unwrap(),
             [
-                first_byte, split_seq_id[1], 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1
+                first_byte,
+                split_seq_id[1],
+                8,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
             ]
         );
     }
-
 }
