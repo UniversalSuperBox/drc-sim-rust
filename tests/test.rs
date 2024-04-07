@@ -8,13 +8,16 @@ I have no idea whether this will work on big-endian systems.
 */
 fn data_from_wupvideopacket(input: WUPVideoPacket) -> Result<Vec<u8>, &str> {
     if input.magic > 15 {
-        return Err("magic is only a 4-bit number on the wire.");
+        return Err("magic is only a 4-bit number on the wire");
+    }
+    if input.packet_type > 3 {
+        return Err("packet_type is only a 2-bit number on the wire");
     }
     if input.seq_id > 1023 {
-        return Err("seq_id is only a 10-bit number on the wire.");
+        return Err("seq_id is only a 10-bit number on the wire");
     }
     if input.payload_size > 2047 {
-        return Err("payload_size is only an 11-bit number on the wire.");
+        return Err("payload_size is only an 11-bit number on the wire");
     }
 
     let mut data: Vec<u8> = Vec::new();
@@ -112,29 +115,67 @@ fn christmas_tree_video_packet() {
     );
 }
 
+#[test]
+fn fail_with_invalid_magic() {
+    let mut packet = ONES.clone();
+    packet.magic = 14;
+    assert_eq!(
+        process_video_packet(&data_from_wupvideopacket(packet).unwrap()),
+        None
+    );
+}
+
+#[test]
+fn fail_with_invalid_type() {
+    let mut packet = CHRISTMAS_TREE_SLICE.clone();
+    packet[0] = 0xF8;
+    assert_eq!(
+        process_video_packet(&packet),
+        None
+    );
+}
+
+// I'm mostly using this to learn about property-based testing... given
+// writing these tests requires reimplementing data_from_wupvideopacket,
+// I don't think they're the best tests ever created.
 proptest! {
     #[test]
-    fn creates_all_magic_values(m in 0..15) {
-        let m = m as u8;
-        let mut packet = ONES.clone();
-        packet.magic = m;
-        let first_byte = m << 4;
-        println!("{}", first_byte);
+    fn twiddle_first_two_bytes(magic: u8, packet_type: u8, seq_id in 0..1024) {
+        let seq_id: u16 = seq_id as u16;
+        do_first_bytes_test(magic, packet_type, seq_id);
+    }
+}
+
+fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
+    let seq_id = seq_id as u16;
+    let mut packet = ONES.clone();
+    packet.magic = magic;
+    packet.packet_type = packet_type;
+    packet.seq_id = seq_id;
+    if magic > 15 {
+        assert_eq!(
+            data_from_wupvideopacket(packet),
+            Err("magic is only a 4-bit number on the wire")
+        );
+    } else if packet_type > 3 {
+        assert_eq!(
+            data_from_wupvideopacket(packet),
+            Err("packet_type is only a 2-bit number on the wire")
+        );
+    } else if seq_id > 1023 {
+        assert_eq!(
+            data_from_wupvideopacket(packet),
+            Err("seq_id is only a 10-bit number on the wire")
+        );
+    } else {
+        let split_seq_id = seq_id.to_be_bytes();
+        let first_byte = (magic << 4) | (packet_type << 2) | split_seq_id[0];
         assert_eq!(
             data_from_wupvideopacket(packet).unwrap(),
             [
-                first_byte, 1, 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1
+                first_byte, split_seq_id[1], 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1
             ]
-        )
+        );
     }
-    #[test]
-    fn fails_on_large_magic(m in 16..255) {
-        let m = m as u8;
-        let mut packet = ONES.clone();
-        packet.magic = m;
-        assert_eq!(
-            data_from_wupvideopacket(packet),
-            Err("magic is only a 4-bit number on the wire.")
-        )
-    }
+
 }
