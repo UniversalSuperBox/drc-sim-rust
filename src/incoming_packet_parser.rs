@@ -57,9 +57,9 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
     }
 
     let len = bits.refill_lookahead();
-    assert!(len >= 32);
+    assert!(len >= 16);
 
-    // first 32 bits of the header tell us what type it is and
+    // first 16 bits of the header tell us what type it is and
     // where it fits in order
     let magic = bits.peek(4) as u8;
     if magic != 15 {
@@ -77,9 +77,9 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
     bits.consume(10);
 
     let len = bits.refill_lookahead();
-    assert!(len >= 32);
+    assert!(len >= 16);
 
-    // next 32 bits regard what this video packet looks like
+    // next 16 bits regard what this video packet looks like
     let init = bits.peek(1) != 0;
     bits.consume(1);
     let frame_begin = bits.peek(1) != 0;
