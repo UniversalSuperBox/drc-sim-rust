@@ -73,13 +73,23 @@ fn main() -> std::io::Result<()> {
 
             trace!("Packet {i}: {packet:?}");
 
+            let timestamp = packet.timestamp;
+
             let frame_accumulator = frame_accumulators
-                .entry(packet.timestamp)
-                .or_insert(FrameAccumulator::new(packet.timestamp));
+                .entry(timestamp)
+                .or_insert(FrameAccumulator::new(timestamp));
 
             frame_accumulator.add_packet(packet);
 
-            debug!("{:?}", frame_accumulator.complete())
+            let frame_dgrams = match frame_accumulator.complete() {
+                Some(data) => data,
+                None => {
+                    continue;
+                }
+            };
+
+            frame_accumulators.remove(&timestamp);
+            debug!("{:?}", frame_accumulators.keys().len());
         }
         debug!("Largest payload we saw was {}", largest_payload);
     }
