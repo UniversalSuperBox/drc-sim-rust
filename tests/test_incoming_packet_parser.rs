@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
 use proptest::prelude::*;
 
@@ -6,7 +8,7 @@ process_video_packet.
 
 I have no idea whether this will work on big-endian systems.
 */
-fn data_from_wupvideopacket(input: WUPVideoPacket) -> Result<Vec<u8>, &str> {
+fn data_from_wupvideopacket(input: WUPVideoPacket) -> Result<Vec<u8>, &'static str> {
     if input.magic > 15 {
         return Err("magic is only a 4-bit number on the wire");
     }

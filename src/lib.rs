@@ -1,4 +1,5 @@
 pub mod incoming_packet_parser;
+pub mod packet_organizer;
 pub mod sockets;
 
 // 2063 is the maximum theoretical size of the WUP video packet. I've

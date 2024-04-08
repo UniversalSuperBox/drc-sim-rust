@@ -7,10 +7,12 @@
 use core::fmt;
 
 use bitter::{BigEndianReader, BitReader};
-use log::{error, max_level, trace, LevelFilter};
+use log::error;
+
+use crate::WUP_VID_PACKET_BUFFER_SIZE;
 
 #[derive(PartialEq, Clone)]
-pub struct WUPVideoPacket<'a> {
+pub struct WUPVideoPacket {
     pub magic: u8,                // 4
     pub packet_type: u8,          // 2
     pub seq_id: u16,              // 10 (16b/2B)
@@ -22,12 +24,19 @@ pub struct WUPVideoPacket<'a> {
     pub payload_size: u16,        // 11 (32b/4B)
     pub timestamp: u32,           // 32 (64b/8B)
     pub extended_header: [u8; 8], // 64 (128b/16B)
-    pub payload: &'a [u8],        // up to 2047 bytes, I've never seen larger than 1672
-                                  // minimum 17B, maximum 2063B (but I don't think the WUP actually
-                                  // sends dgrams that large)
+    // pub payload: &'a [u8],        // up to 2047 bytes, I've never seen larger than 1672
+    //                               // minimum 17B, maximum 2063B (but I don't think the WUP actually
+    //                               // sends dgrams that large)
+    pub orig_data: [u8; WUP_VID_PACKET_BUFFER_SIZE],
 }
 
-impl fmt::Debug for WUPVideoPacket<'_> {
+impl WUPVideoPacket {
+    fn payload(&self) -> &[u8] {
+        return &self.orig_data[16..];
+    }
+}
+
+impl fmt::Debug for WUPVideoPacket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Point")
             .field("magic", &self.magic)
@@ -41,15 +50,11 @@ impl fmt::Debug for WUPVideoPacket<'_> {
             .field("payload_size", &self.payload_size)
             .field("timestamp", &self.timestamp)
             .field("extended_header", &self.extended_header)
-            .field(
-                "payload",
-                &format_args!("&[u8] of length {}", &self.payload.len()),
-            )
             .finish()
     }
 }
 
-pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
+pub fn process_video_packet(packet: [u8; WUP_VID_PACKET_BUFFER_SIZE]) -> Option<WUPVideoPacket> {
     let mut bits = BigEndianReader::new(&packet);
 
     if packet.len() < 17 {
@@ -106,8 +111,6 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
         return None;
     }
 
-    let payload = &packet[16..];
-
     return Some(WUPVideoPacket {
         magic: magic,
         packet_type: packet_type,
@@ -120,6 +123,6 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
         payload_size: expected_payload_size_bytes,
         timestamp: timestamp,
         extended_header: extended_header,
-        payload: payload,
+        orig_data: packet,
     });
 }
