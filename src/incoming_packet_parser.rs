@@ -5,6 +5,7 @@
 // const WII_VIDEO_HEIGHT: u16 = 480;
 
 use core::fmt;
+use std::{cmp::Ordering, num::Wrapping};
 
 use bitter::{BigEndianReader, BitReader};
 use log::error;
@@ -22,7 +23,7 @@ pub struct WUPVideoPacket {
     pub frame_end: bool,          // 1
     pub has_timestamp: bool,      // 1
     pub payload_size: u16,        // 11 (32b/4B)
-    pub timestamp: u32,           // 32, counts in microseconds, overflows every ~1.19 hours (64b/8B)
+    pub timestamp: u32, // 32, counts in microseconds, overflows every ~1.19 hours (64b/8B)
     pub extended_header: [u8; 8], // 64 (128b/16B)
     // pub payload: &'a [u8],        // up to 2047 bytes, I've never seen larger than 1672
     //                               // minimum 17B, maximum 2063B (but I don't think the WUP actually
@@ -52,6 +53,19 @@ impl fmt::Debug for WUPVideoPacket {
             .field("extended_header", &self.extended_header)
             .finish()
     }
+}
+
+/// Compares a against b with the RFC 1323 PAWS algorithm.
+/// https://blog.theprogrammingjunkie.com/post/paws/
+pub fn timestamp_compare(a: u32, b: u32) -> Ordering {
+    if a == b {
+        return Ordering::Equal;
+    }
+    let diff = Wrapping(a) - Wrapping(b);
+    if diff > Wrapping(0) && diff < Wrapping(2 ^ 31) {
+        return Ordering::Greater;
+    }
+    return Ordering::Less;
 }
 
 pub fn process_video_packet(packet: [u8; WUP_VID_PACKET_BUFFER_SIZE]) -> Option<WUPVideoPacket> {
