@@ -22,7 +22,7 @@ pub struct WUPVideoPacket {
     pub frame_end: bool,          // 1
     pub has_timestamp: bool,      // 1
     pub payload_size: u16,        // 11 (32b/4B)
-    pub timestamp: u32,           // 32 (64b/8B)
+    pub timestamp: u32,           // 32, counts in microseconds, overflows every ~1.19 hours (64b/8B)
     pub extended_header: [u8; 8], // 64 (128b/16B)
     // pub payload: &'a [u8],        // up to 2047 bytes, I've never seen larger than 1672
     //                               // minimum 17B, maximum 2063B (but I don't think the WUP actually

@@ -8,9 +8,7 @@ use std::{
 };
 
 use drc_sim_rust_lib::{
-    incoming_packet_parser,
-    packet_organizer::{self, FrameAccumulator},
-    WUP_VID_PACKET_BUFFER_SIZE,
+    incoming_packet_parser, packet_organizer::{self, FrameAccumulator}, STALE_FRAME_RESET_POINT, STALE_FRAME_THRESHOLD, WUP_VID_PACKET_BUFFER_SIZE
 };
 use log::{debug, error, trace};
 
@@ -20,9 +18,9 @@ fn main() -> std::io::Result<()> {
         let mut file_reader = BufReader::new(File::open("video_packets")?);
 
         let mut i = 0;
-        let mut dgrams_since_frame_begin = 0;
-        let mut payload_bytes: u32 = 0;
-        let mut largest_payload: u32 = 0;
+        let mut lowest_acceptable_timestamp;
+        let mut completed_frames = 0;
+        let mut dropped_frames = 0;
 
         let mut frame_accumulators: HashMap<u32, packet_organizer::FrameAccumulator> =
             HashMap::new();
@@ -53,27 +51,36 @@ fn main() -> std::io::Result<()> {
                 Some(val) => val,
             };
 
-            if packet.frame_begin {
-                debug!("Begin! {} {}", packet.seq_id, packet.timestamp);
-                dgrams_since_frame_begin = 0;
-                payload_bytes = 0;
-            }
-            if packet.frame_end {
-                debug!(
-                    "End! {} {} {} {}",
-                    packet.seq_id, packet.timestamp, dgrams_since_frame_begin, payload_bytes
-                );
-                if payload_bytes > largest_payload {
-                    largest_payload = payload_bytes;
-                }
-            }
-
-            dgrams_since_frame_begin += 1;
-            payload_bytes += packet.payload_size as u32;
-
             trace!("Packet {i}: {packet:?}");
 
             let timestamp = packet.timestamp;
+
+            if timestamp > STALE_FRAME_RESET_POINT {
+                lowest_acceptable_timestamp = 0;
+            } else {
+                lowest_acceptable_timestamp = timestamp - STALE_FRAME_THRESHOLD;
+            }
+
+            // TODO: It would be preferable to do this every time we
+            // create a new frame accumulator rather than on every
+            // dgram.
+            let mut accumulators_to_remove: Vec<u32> = Vec::new();
+            if frame_accumulators.len() > 1 {
+                for accu_timestamp in frame_accumulators.keys().cloned() {
+                    if accu_timestamp < lowest_acceptable_timestamp {
+                        accumulators_to_remove.push(accu_timestamp);
+                    }
+                }
+            }
+            // I tried to avoid this separate loop by cloning the
+            // HashMap's keys and performing the removal inside the
+            // above loop, but the compiler always complained that I was
+            // trying to mutate the HashMap after requesting an
+            // immutable borrow of it at the declaration of the loop.
+            for to_remove in accumulators_to_remove {
+                dropped_frames += 1;
+                frame_accumulators.remove(&to_remove);
+            }
 
             let frame_accumulator = frame_accumulators
                 .entry(timestamp)
@@ -82,16 +89,20 @@ fn main() -> std::io::Result<()> {
             frame_accumulator.add_packet(packet);
 
             let frame_dgrams = match frame_accumulator.complete() {
-                Some(data) => data,
+                Some(data) => {
+                    completed_frames += 1;
+                    data
+                },
                 None => {
                     continue;
                 }
             };
 
+            debug!("{:?}", frame_dgrams);
+
             frame_accumulators.remove(&timestamp);
-            debug!("{:?}", frame_accumulators.keys().len());
+            debug!("{:?} frames were incomplete at time of exiting, completed {} dropped {}", frame_accumulators.len(), completed_frames, dropped_frames);
         }
-        debug!("Largest payload we saw was {}", largest_payload);
     }
     Ok(())
 }
