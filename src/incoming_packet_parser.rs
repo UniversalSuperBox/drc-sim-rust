@@ -49,15 +49,15 @@ impl fmt::Debug for WUPVideoPacket {
 
 /// Compares a against b with the RFC 1323 PAWS algorithm.
 /// https://blog.theprogrammingjunkie.com/post/paws/
-pub fn timestamp_compare(a: u32, b: u32) -> Ordering {
-    if a == b {
+pub fn timestamp_compare(s: u32, t: u32) -> Ordering {
+    if s == t {
         return Ordering::Equal;
     }
-    let diff = a.wrapping_sub(b);
-    if diff > 0 && diff < (2 ^ 31) {
-        return Ordering::Greater;
+    println!("{}, {}, {}, {}", s, t, t.wrapping_sub(s), 2u32.pow(31));
+    if t.wrapping_sub(s) < (2u32.pow(31)) {
+        return Ordering::Less;
     }
-    return Ordering::Less;
+    return Ordering::Greater;
 }
 
 pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {

@@ -1,4 +1,6 @@
-use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
+use std::cmp::Ordering;
+
+use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, timestamp_compare, WUPVideoPacket};
 use proptest::prelude::*;
 
 /** Converts a WUPVideoPacket into big-endian bytes as parsed by
@@ -205,4 +207,14 @@ fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
             ]
         );
     }
+}
+
+#[test]
+fn test_timestamp_compare() {
+    assert_eq!(timestamp_compare(0, 0xFFFFFFFF), Ordering::Greater, "0 should come after 0xFFFFFFFF");
+    assert_eq!(timestamp_compare(0xFFFFFFFF, 0), Ordering::Less, "0xFFFFFFFF should come before 0");
+    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xF1), Ordering::Less, "0xFFFFFFFF should come before 0xF1");
+    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xFFFFFFFE), Ordering::Greater, "0xFFFFFFFF should come after 0xFFFFFFFE");
+    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xFFFF), Ordering::Greater);
+    assert_eq!(timestamp_compare(0xFFFF1, 0xFFFFFFFF), Ordering::Less, "0xFFFF1 should come before 0xFFFFFFFF")
 }
