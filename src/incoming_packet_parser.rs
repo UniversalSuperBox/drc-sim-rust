@@ -5,12 +5,10 @@
 // const WII_VIDEO_HEIGHT: u16 = 480;
 
 use core::fmt;
-use std::{cmp::Ordering, num::Wrapping};
+use std::cmp::Ordering;
 
 use bitter::{BigEndianReader, BitReader};
 use log::error;
-
-use crate::WUP_VID_PACKET_BUFFER_SIZE;
 
 #[derive(PartialEq, Clone)]
 pub struct WUPVideoPacket {
@@ -25,16 +23,9 @@ pub struct WUPVideoPacket {
     pub payload_size: u16,        // 11 (32b/4B)
     pub timestamp: u32, // 32, counts in microseconds, overflows every ~1.19 hours (64b/8B)
     pub extended_header: [u8; 8], // 64 (128b/16B)
-    // pub payload: &'a [u8],        // up to 2047 bytes, I've never seen larger than 1672
-    //                               // minimum 17B, maximum 2063B (but I don't think the WUP actually
-    //                               // sends dgrams that large)
-    pub orig_data: [u8; WUP_VID_PACKET_BUFFER_SIZE],
-}
-
-impl WUPVideoPacket {
-    fn payload(&self) -> &[u8] {
-        return &self.orig_data[16..];
-    }
+    pub payload: Vec<u8>, // up to 2047 bytes, I've never seen larger than 1672
+                        // minimum 17B, maximum 2063B (but I don't think the WUP actually
+                        // sends dgrams that large)
 }
 
 impl fmt::Debug for WUPVideoPacket {
@@ -51,6 +42,7 @@ impl fmt::Debug for WUPVideoPacket {
             .field("payload_size", &self.payload_size)
             .field("timestamp", &self.timestamp)
             .field("extended_header", &self.extended_header)
+            .field("payload", &format!("size {}", &self.payload.len()))
             .finish()
     }
 }
@@ -61,17 +53,18 @@ pub fn timestamp_compare(a: u32, b: u32) -> Ordering {
     if a == b {
         return Ordering::Equal;
     }
-    let diff = Wrapping(a) - Wrapping(b);
-    if diff > Wrapping(0) && diff < Wrapping(2 ^ 31) {
+    let diff = a.wrapping_sub(b);
+    if diff > 0 && diff < (2 ^ 31) {
         return Ordering::Greater;
     }
     return Ordering::Less;
 }
 
-pub fn process_video_packet(packet: [u8; WUP_VID_PACKET_BUFFER_SIZE]) -> Option<WUPVideoPacket> {
-    let mut bits = BigEndianReader::new(&packet);
+pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
+    let mut bits = BigEndianReader::new(packet);
 
-    if packet.len() < 17 {
+    let packet_len = packet.len();
+    if packet_len < 17 {
         error!("packet was too short to process as video");
     }
 
@@ -125,6 +118,15 @@ pub fn process_video_packet(packet: [u8; WUP_VID_PACKET_BUFFER_SIZE]) -> Option<
         return None;
     }
 
+    let expected_packet_len = expected_payload_size_bytes as usize + 16;
+    if packet_len < expected_packet_len {
+        error!(
+            "Packet data was only {} bytes, need {}",
+            packet_len, expected_packet_len
+        );
+        return None;
+    }
+
     return Some(WUPVideoPacket {
         magic: magic,
         packet_type: packet_type,
@@ -137,6 +139,6 @@ pub fn process_video_packet(packet: [u8; WUP_VID_PACKET_BUFFER_SIZE]) -> Option<
         payload_size: expected_payload_size_bytes,
         timestamp: timestamp,
         extended_header: extended_header,
-        orig_data: packet,
+        payload: packet[16..(expected_payload_size_bytes as usize + 16)].to_vec(),
     });
 }

@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
 use proptest::prelude::*;
 
@@ -51,49 +49,62 @@ fn data_from_wupvideopacket(input: WUPVideoPacket) -> Result<Vec<u8>, &'static s
     return Ok(data);
 }
 
-const ONES: WUPVideoPacket = WUPVideoPacket {
-    magic: 15,
-    packet_type: 0,
-    seq_id: 1,
-    init: false,
-    frame_begin: false,
-    chunk_end: false,
-    frame_end: false,
-    has_timestamp: true,
-    payload_size: 1,
-    timestamp: 1,
-    extended_header: 0u64.to_be_bytes(),
-    payload: &1u8.to_be_bytes(),
-};
+const ONES_SLICE: [u8; 17] = [
+    0xF0, 0x1, // magic, packet_type, seq_id
+    0x8, //init, frame_begin, chunk_end, frame_end, has_timestamp, first 3 of payload_size
+    0x1, // other 8 of payload_size
+    0x0, 0x0, 0x0, 0x1, //timestamp
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,  //extended_header
+    0x01, // payload
+];
 
-const CHRISTMAS_TREE_PKT: WUPVideoPacket = WUPVideoPacket {
-    magic: 15,
-    packet_type: 0,
-    seq_id: 1023,
-    init: true,
-    frame_begin: true,
-    chunk_end: true,
-    frame_end: true,
-    has_timestamp: true,
-    payload_size: 2047,
-    timestamp: 0xFFFFFFFF,
-    extended_header: 0xFFFFFFFFFFFFFFFFu64.to_be_bytes(),
-    payload: &0xFFu8.to_be_bytes(),
-};
+fn data_ones() -> WUPVideoPacket {
+    return WUPVideoPacket {
+        magic: 15,
+        packet_type: 0,
+        seq_id: 1,
+        init: false,
+        frame_begin: false,
+        chunk_end: false,
+        frame_end: false,
+        has_timestamp: true,
+        payload_size: 1,
+        timestamp: 1,
+        extended_header: 0u64.to_be_bytes(),
+        payload: Vec::from([0x1]),
+    };
+}
 
 const CHRISTMAS_TREE_SLICE: [u8; 17] = [
     0xF3, 0xFF, // magic, packet_type, seq_id
-    0xFF, //init, frame_begin, chunk_end, frame_end, has_timestamp, first 3 of payload_size
-    0xFF, // other 8 of payload_size
+    0xF8, //init, frame_begin, chunk_end, frame_end, has_timestamp, first 3 of payload_size
+    0x1,  // other 8 of payload_size
     0xFF, 0xFF, 0xFF, 0xFF, //timestamp
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, //extended_header
     0xFF, // payload
 ];
 
+fn data_christmas_tree() -> WUPVideoPacket {
+    return WUPVideoPacket {
+        magic: 15,
+        packet_type: 0,
+        seq_id: 1023,
+        init: true,
+        frame_begin: true,
+        chunk_end: true,
+        frame_end: true,
+        has_timestamp: true,
+        payload_size: 1,
+        timestamp: 0xFFFFFFFF,
+        extended_header: 0xFFFFFFFFFFFFFFFFu64.to_be_bytes(),
+        payload: Vec::from([0xFF]),
+    };
+}
+
 #[test]
 fn test_data_from_wupvideopacket_ones() {
     assert_eq!(
-        data_from_wupvideopacket(ONES).unwrap(),
+        data_from_wupvideopacket(data_ones()).unwrap(),
         [0xF0, 1, 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1]
     );
 }
@@ -101,11 +112,8 @@ fn test_data_from_wupvideopacket_ones() {
 #[test]
 fn test_data_from_wupvideopacket_christmastree() {
     assert_eq!(
-        data_from_wupvideopacket(CHRISTMAS_TREE_PKT).unwrap(),
-        [
-            0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF
-        ]
+        data_from_wupvideopacket(data_christmas_tree()).unwrap(),
+        CHRISTMAS_TREE_SLICE
     );
 }
 
@@ -113,13 +121,18 @@ fn test_data_from_wupvideopacket_christmastree() {
 fn christmas_tree_video_packet() {
     assert_eq!(
         process_video_packet(&CHRISTMAS_TREE_SLICE),
-        Some(CHRISTMAS_TREE_PKT)
+        Some(data_christmas_tree())
     );
 }
 
 #[test]
+fn ones_video_packet() {
+    assert_eq!(process_video_packet(&ONES_SLICE), Some(data_ones()));
+}
+
+#[test]
 fn fail_with_invalid_magic() {
-    let mut packet = ONES.clone();
+    let mut packet = data_ones();
     packet.magic = 14;
     assert_eq!(
         process_video_packet(&data_from_wupvideopacket(packet).unwrap()),
@@ -147,7 +160,7 @@ proptest! {
 
 fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
     let seq_id = seq_id as u16;
-    let mut packet = ONES.clone();
+    let mut packet = data_ones();
     packet.magic = magic;
     packet.packet_type = packet_type;
     packet.seq_id = seq_id;
