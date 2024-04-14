@@ -1,90 +1,120 @@
-use std::{cmp::Reverse, collections::BinaryHeap};
+use std::{collections::HashMap};
 
+use arbitrary_int::{u10, Number};
 use log::{error, trace};
 
-use crate::incoming_packet_parser::{process_video_packet, WUPVideoPacket};
-use std::cmp::Ordering;
-
-struct SortablePacket<'a> {
-    sortable_seq_id: u32,
-    data: &'a WUPVideoPacket,
-}
+use crate::incoming_packet_parser::{WUPVideoPacket};
 
 pub struct FrameAccumulator {
-    pub timestamp: u32,
-    pub packets: Vec<WUPVideoPacket>,
+    timestamp_: u32,
+    packets: HashMap<u10, WUPVideoPacket>,
+    begin_packet_: Option<u10>,
+    end_packet_: Option<u10>,
+}
+
+pub enum PacketRejectReason {
+    /// The given packet indicates it does not have a timestamp.
+    NoTimestamp,
+    /// The given packet's timestamp does not match this
+    /// FrameAccumulator.
+    WrongTimestamp,
+    /// This FrameAccumulator already has a packet with 'frame_begin'.
+    AlreadyHaveBegin,
+    /// This FrameAccumulator already has a packet with 'frame_end'.
+    AlreadyHaveEnd,
+    /// This FrameAccumulator already has a packet with that sequence
+    /// ID.
+    AlreadyHaveSeq,
 }
 
 impl FrameAccumulator {
     pub fn new(timestamp: u32) -> FrameAccumulator {
         return FrameAccumulator {
-            timestamp: timestamp,
-            packets: Vec::new(),
+            timestamp_: timestamp,
+            packets: HashMap::new(),
+            begin_packet_: None,
+            end_packet_: None,
         };
     }
 
-    pub fn add_packet(&mut self, packet: WUPVideoPacket) {
-        assert!(packet.has_timestamp);
-        assert!(packet.timestamp == self.timestamp);
-        self.packets.push(packet);
+    pub fn timestamp(&self) -> &u32 {
+        return &self.timestamp_;
+    }
+
+    pub fn add_packet(&mut self, packet: WUPVideoPacket) -> Result<(), PacketRejectReason> {
+        if !packet.has_timestamp {
+            return Err(PacketRejectReason::NoTimestamp);
+        }
+        if !packet.timestamp == self.timestamp_ {
+            return Err(PacketRejectReason::WrongTimestamp);
+        }
+        let incoming_seq_id = packet.seq_id.clone();
+        if packet.frame_begin {
+            if self.begin_packet_ != None {
+                return Err(PacketRejectReason::AlreadyHaveBegin);
+            }
+            self.begin_packet_ = Some(incoming_seq_id);
+        }
+        if packet.frame_end {
+            if self.end_packet_ != None {
+                return Err(PacketRejectReason::AlreadyHaveEnd);
+            }
+            self.end_packet_ = Some(incoming_seq_id);
+        }
+        // This could be replaced with self.packets.try_insert if that
+        // ever makes it into Rust.
+        // https://github.com/rust-lang/rust/issues/82766
+        if self.packets.contains_key(&incoming_seq_id) {
+            return Err(PacketRejectReason::AlreadyHaveSeq);
+        }
+        let existing = self.packets.insert(incoming_seq_id, packet);
+        if existing != None {
+            panic!(
+                "Clobbered a packet in FrameAccumulator with timestamp {} seq_id {}",
+                self.timestamp_, incoming_seq_id
+            );
+        }
+        return Ok(());
     }
 
     pub fn complete(&self) -> Option<Vec<&WUPVideoPacket>> {
-        // First, we need to figure out whether we have the start and
-        // end dgrams
-        let mut begin_seq_id: Option<u16> = None;
-        let mut end_seq_id: Option<u16> = None;
-        for packet in &self.packets {
-            if packet.frame_begin {
-                begin_seq_id = Some(packet.seq_id);
-            } else if packet.frame_end {
-                end_seq_id = Some(packet.seq_id);
-            }
-        }
-        if begin_seq_id.is_none() {
-            trace!("Don't have a start dgram");
-            return None;
-        }
-        if end_seq_id.is_none() {
-            trace!("Don't have an end dgram");
+        if self.begin_packet_ == None || self.end_packet_ == None {
             return None;
         }
 
-        let mut virt_end_seq_id = end_seq_id.unwrap();
-        if end_seq_id < begin_seq_id {
-            virt_end_seq_id = end_seq_id.unwrap() + begin_seq_id.unwrap()
-        }
-        let expected_num_dgrams = (begin_seq_id.unwrap()..virt_end_seq_id).len() + 1;
+        let begin_packet: u16 = self.begin_packet_.unwrap().into();
+        let end_packet: u16 = self.end_packet_.unwrap().into();
+        let end_packet_absolute: u16 = match end_packet > begin_packet {
+            true => end_packet,
+            false => end_packet + u16::from(u10::MAX),
+        };
+
+        let expected_num_packets = (end_packet_absolute + 1) - begin_packet;
 
         let have_packets = self.packets.len();
-
-        if have_packets != expected_num_dgrams {
-            trace!("Have {} dgrams want {}", have_packets, expected_num_dgrams);
+        if have_packets != expected_num_packets.into() {
+            trace!("Have {} dgrams want {}", have_packets, expected_num_packets);
             return None;
         }
 
-        // We have all of the dgrams we need, now we need to sort and
-        // output them.
-        let mut sorted_packets: Vec<SortablePacket> = Vec::new();
-        for packet in &self.packets {
-            let virt_seq_id = match packet.seq_id.cmp(&begin_seq_id.unwrap()) {
-                Ordering::Less => packet.seq_id as u32 + begin_seq_id.unwrap() as u32,
-                Ordering::Greater => packet.seq_id.into(),
-                Ordering::Equal => packet.seq_id.into(),
+        // We have the correct number of packets, but do we have the
+        // correct packets within that stride?
+        let mut sorted_packets: Vec<&WUPVideoPacket> = Vec::new();
+        for i in begin_packet..end_packet_absolute {
+            let wrapped_i = u10::new(i % 1024);
+            let packet = match self.packets.get(&wrapped_i) {
+                None => {
+                    error!(
+                        "FrameAccumulator has correct number of packets but is missing packet {}",
+                        wrapped_i
+                    );
+                    return None;
+                }
+                Some(p) => p,
             };
-            let sortable_packet = SortablePacket {
-                sortable_seq_id: virt_seq_id,
-                data: packet,
-            };
-            sorted_packets.push(sortable_packet);
-        }
-        sorted_packets.sort_by_key(|packet| packet.sortable_seq_id);
-
-        let mut returned_packets: Vec<&WUPVideoPacket> = Vec::new();
-        for packet in sorted_packets {
-            returned_packets.push(packet.data);
+            sorted_packets.push(packet);
         }
 
-        return Some(returned_packets);
+        return Some(sorted_packets);
     }
 }

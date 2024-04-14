@@ -7,20 +7,21 @@
 use core::fmt;
 use std::cmp::Ordering;
 
+use arbitrary_int::{u10, u11, u2, u4};
 use bitter::{BigEndianReader, BitReader};
 use log::error;
 
 #[derive(PartialEq, Clone)]
 pub struct WUPVideoPacket {
-    pub magic: u8,                // 4
-    pub packet_type: u8,          // 2
-    pub seq_id: u16,              // 10 (16b/2B)
+    pub magic: u4,                // 4
+    pub packet_type: u2,          // 2
+    pub seq_id: u10,              // 10 (16b/2B)
     pub init: bool,               // 1
     pub frame_begin: bool,        // 1
     pub chunk_end: bool,          // 1
     pub frame_end: bool,          // 1
     pub has_timestamp: bool,      // 1
-    pub payload_size: u16,        // 11 (32b/4B)
+    pub payload_size: u11,        // 11 (32b/4B)
     pub timestamp: u32, // 32, counts in microseconds, overflows every ~1.19 hours (64b/8B)
     pub extended_header: [u8; 8], // 64 (128b/16B)
     pub payload: Vec<u8>, // up to 2047 bytes, I've never seen larger than 1672
@@ -47,17 +48,40 @@ impl fmt::Debug for WUPVideoPacket {
     }
 }
 
-/// Compares a against b with the RFC 1323 PAWS algorithm.
+/// Compares s against t with the RFC 1323 PAWS algorithm. Returns None
+/// when s and t are exactly 0x80000000 apart as it is not possible to
+/// know which is higher. Returns the appropriate ordering for wrapping
+/// 32-bit values (where 0 is greater than 0xFFFFFFFF, for example) in
+/// all other cases.
 /// https://blog.theprogrammingjunkie.com/post/paws/
-pub fn timestamp_compare(s: u32, t: u32) -> Ordering {
+pub fn u32_paws_compare(s: u32, t: u32) -> Option<Ordering> {
     if s == t {
-        return Ordering::Equal;
+        return Some(Ordering::Equal);
     }
-    println!("{}, {}, {}, {}", s, t, t.wrapping_sub(s), 2u32.pow(31));
-    if t.wrapping_sub(s) < (2u32.pow(31)) {
-        return Ordering::Less;
+    return paws_comparison(t.wrapping_sub(s), 2u32.pow(31));
+}
+
+/// Compares s against t with the RFC 1323 PAWS algorithm. Returns None
+/// when s and t are exactly 0x200 apart as it is not possible to
+/// know which is higher. Returns the appropriate ordering for wrapping
+/// 10-bit values (where 0 is greater than 0x3FF, for example) in
+/// all other cases.
+/// https://blog.theprogrammingjunkie.com/post/paws/
+pub fn u10_paws_compare(s: u10, t: u10) -> Option<Ordering> {
+    if s == t {
+        return Some(Ordering::Equal);
     }
-    return Ordering::Greater;
+    return paws_comparison(t.wrapping_sub(s), u10::new(2u16.pow(9)));
+}
+
+pub fn paws_comparison<T: Eq + PartialOrd>(diff: T, half_space: T) -> Option<Ordering> {
+    if diff == half_space {
+        return None;
+    }
+    if diff < half_space {
+        return Some(Ordering::Less);
+    }
+    return Some(Ordering::Greater);
 }
 
 pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
@@ -128,15 +152,15 @@ pub fn process_video_packet(packet: &[u8]) -> Option<WUPVideoPacket> {
     }
 
     return Some(WUPVideoPacket {
-        magic: magic,
-        packet_type: packet_type,
-        seq_id: seq_id,
+        magic: u4::new(magic),
+        packet_type: u2::new(packet_type),
+        seq_id: u10::new(seq_id),
         init: init,
         frame_begin: frame_begin,
         chunk_end: chunk_end,
         frame_end: frame_end,
         has_timestamp: has_timestamp,
-        payload_size: expected_payload_size_bytes,
+        payload_size: u11::new(expected_payload_size_bytes),
         timestamp: timestamp,
         extended_header: extended_header,
         payload: packet[16..(expected_payload_size_bytes as usize + 16)].to_vec(),

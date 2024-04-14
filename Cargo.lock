@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "arbitrary-int"
+version = "1.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c84fc003e338a6f69fbd4f7fe9f92b535ff13e9af8997f3b14b6ddff8b1df46d"
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -70,6 +76,7 @@ dependencies = [
 name = "drc-sim-rust"
 version = "0.1.0"
 dependencies = [
+ "arbitrary-int",
  "assert_matches",
  "bitter",
  "log",

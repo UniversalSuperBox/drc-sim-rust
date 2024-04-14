@@ -1,6 +1,9 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, panic::catch_unwind};
 
-use drc_sim_rust_lib::incoming_packet_parser::{process_video_packet, timestamp_compare, WUPVideoPacket};
+use arbitrary_int::{u10, u11, u2, u4};
+use drc_sim_rust_lib::incoming_packet_parser::{
+    process_video_packet, u10_paws_compare, u32_paws_compare, WUPVideoPacket
+};
 use proptest::prelude::*;
 
 /** Converts a WUPVideoPacket into big-endian bytes as parsed by
@@ -9,29 +12,18 @@ process_video_packet.
 I have no idea whether this will work on big-endian systems.
 */
 fn data_from_wupvideopacket(input: WUPVideoPacket) -> Result<Vec<u8>, &'static str> {
-    if input.magic > 15 {
-        return Err("magic is only a 4-bit number on the wire");
-    }
-    if input.packet_type > 3 {
-        return Err("packet_type is only a 2-bit number on the wire");
-    }
-    if input.seq_id > 1023 {
-        return Err("seq_id is only a 10-bit number on the wire");
-    }
-    if input.payload_size > 2047 {
-        return Err("payload_size is only an 11-bit number on the wire");
-    }
-
     let mut data: Vec<u8> = Vec::new();
-    let seq_id = input.seq_id.to_be_bytes();
+    let seq_id = u16::from(input.seq_id).to_be_bytes();
 
-    let first_byte: u8 =
-        (input.magic << 4) | (input.packet_type << 2) | (seq_id[0] >> 6) | seq_id[0];
+    let first_byte: u8 = (u8::from(input.magic) << 4)
+        | (u8::from(input.packet_type) << 2)
+        | (u8::from(seq_id[0]) >> 6)
+        | seq_id[0];
     data.push(first_byte);
 
     data.push(seq_id[1]);
 
-    let payload_size = input.payload_size.to_be_bytes();
+    let payload_size = u16::from(input.payload_size).to_be_bytes();
     let third_byte = ((input.init as u8) << 7)
         | ((input.frame_begin as u8) << 6)
         | ((input.chunk_end as u8) << 5)
@@ -62,15 +54,15 @@ const ONES_SLICE: [u8; 17] = [
 
 fn data_ones() -> WUPVideoPacket {
     return WUPVideoPacket {
-        magic: 15,
-        packet_type: 0,
-        seq_id: 1,
+        magic: u4::new(15),
+        packet_type: u2::new(0),
+        seq_id: u10::new(1),
         init: false,
         frame_begin: false,
         chunk_end: false,
         frame_end: false,
         has_timestamp: true,
-        payload_size: 1,
+        payload_size: u11::new(1),
         timestamp: 1,
         extended_header: 0u64.to_be_bytes(),
         payload: Vec::from([0x1]),
@@ -88,15 +80,15 @@ const CHRISTMAS_TREE_SLICE: [u8; 17] = [
 
 fn data_christmas_tree() -> WUPVideoPacket {
     return WUPVideoPacket {
-        magic: 15,
-        packet_type: 0,
-        seq_id: 1023,
+        magic: u4::new(15),
+        packet_type: u2::new(0),
+        seq_id: u10::new(1023),
         init: true,
         frame_begin: true,
         chunk_end: true,
         frame_end: true,
         has_timestamp: true,
-        payload_size: 1,
+        payload_size: u11::new(1),
         timestamp: 0xFFFFFFFF,
         extended_header: 0xFFFFFFFFFFFFFFFFu64.to_be_bytes(),
         payload: Vec::from([0xFF]),
@@ -135,7 +127,7 @@ fn ones_video_packet() {
 #[test]
 fn fail_with_invalid_magic() {
     let mut packet = data_ones();
-    packet.magic = 14;
+    packet.magic = u4::new(14);
     assert_eq!(
         process_video_packet(&data_from_wupvideopacket(packet).unwrap()),
         None
@@ -154,33 +146,19 @@ fn fail_with_invalid_type() {
 // I don't think they're the best tests ever created.
 proptest! {
     #[test]
-    fn twiddle_first_two_bytes(magic: u8, packet_type: u8, seq_id in 0..1024) {
-        let seq_id: u16 = seq_id as u16;
+    fn twiddle_first_two_bytes(magic in 0..15u8, packet_type in 0..3u8, seq_id in 0..1023u16) {
         do_first_bytes_test(magic, packet_type, seq_id);
     }
 }
 
 fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
-    let seq_id = seq_id as u16;
     let mut packet = data_ones();
-    packet.magic = magic;
-    packet.packet_type = packet_type;
-    packet.seq_id = seq_id;
-    if magic > 15 {
-        assert_eq!(
-            data_from_wupvideopacket(packet),
-            Err("magic is only a 4-bit number on the wire")
-        );
-    } else if packet_type > 3 {
-        assert_eq!(
-            data_from_wupvideopacket(packet),
-            Err("packet_type is only a 2-bit number on the wire")
-        );
-    } else if seq_id > 1023 {
-        assert_eq!(
-            data_from_wupvideopacket(packet),
-            Err("seq_id is only a 10-bit number on the wire")
-        );
+    packet.magic = u4::new(magic);
+    packet.packet_type = u2::new(packet_type);
+    packet.seq_id = u10::new(seq_id);
+    if magic > 15 || packet_type > 3 || seq_id > 1023 {
+        let result = catch_unwind(|| data_from_wupvideopacket(packet));
+        assert!(result.is_err());
     } else {
         let split_seq_id = seq_id.to_be_bytes();
         let first_byte = (magic << 4) | (packet_type << 2) | split_seq_id[0];
@@ -209,12 +187,96 @@ fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
     }
 }
 
+/// Ensures that the comparison of s and t equals comparison, and that
+/// the inverse is also true.
+fn do_u32_timestamp_compare_test(s: u32, t: u32, comparison: Ordering) {
+    let result = u32_paws_compare(s, t);
+    assert_eq!(
+        result,
+        Some(comparison),
+        "{:#X} was not {:?} to {:#X} (it was {:?})",
+        s,
+        comparison,
+        t,
+        result
+    );
+    let comparison = comparison.reverse();
+    let result = u32_paws_compare(t, s);
+    assert_eq!(
+        result,
+        Some(comparison),
+        "on inversion test, {:#X} was not {:?} to {:#X} (it was {:?})",
+        s,
+        comparison,
+        t,
+        result
+    );
+}
+
+// This can be seen as a "sanity check" for the property-based test for
+// u32_timestamp_compare: a few values that a human checked the answers for.
 #[test]
-fn test_timestamp_compare() {
-    assert_eq!(timestamp_compare(0, 0xFFFFFFFF), Ordering::Greater, "0 should come after 0xFFFFFFFF");
-    assert_eq!(timestamp_compare(0xFFFFFFFF, 0), Ordering::Less, "0xFFFFFFFF should come before 0");
-    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xF1), Ordering::Less, "0xFFFFFFFF should come before 0xF1");
-    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xFFFFFFFE), Ordering::Greater, "0xFFFFFFFF should come after 0xFFFFFFFE");
-    assert_eq!(timestamp_compare(0xFFFFFFFF, 0xFFFF), Ordering::Greater);
-    assert_eq!(timestamp_compare(0xFFFF1, 0xFFFFFFFF), Ordering::Less, "0xFFFF1 should come before 0xFFFFFFFF")
+fn test_u32_timestamp_compare() {
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x00000000, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x00000001, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x000000F1, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x000000FF, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x0000FFFE, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0xFFFFFFFE, Ordering::Greater);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0xFFFF0000, Ordering::Greater);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x0FFFFFFF, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x0FFFFFFF, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x10000000, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x70000000, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x7FFFFFFE, Ordering::Less);
+    do_u32_timestamp_compare_test(0xFFFFFFFF, 0x80000000, Ordering::Greater);
+    // The comparison between 0x7FFFFFFF and 0xFFFFFFFF is difficult
+    // because their difference is exactly 2**31.
+    assert_eq!(u32_paws_compare(0xFFFFFFFF, 0x7FFFFFFF), None);
+    assert_eq!(u32_paws_compare(0x7FFFFFFF, 0xFFFFFFFF), None);
+
+    // Try the hard comparison again but with an arbitrarily chosen s
+    assert_eq!(u32_paws_compare(0x9E911F8, 0x89E911F8), None);
+    assert_eq!(u32_paws_compare(0x89E911F8, 0x9E911F8), None);
+}
+
+proptest! {
+    #[test]
+    fn test_u32_timestamp_compare_prop(s in 0u32..0xFFFFFFFFu32, difference in 0u32..0xFFFFFFFFu32) {
+        do_u32_timestamp_compare_prop(s, difference);
+    }
+    #[test]
+    fn test_u10_timestamp_compare_prop(s in 0u16..0x3FFu16, difference in 0u16..0x3FFu16) {
+        do_u10_timestamp_compare_prop(s, difference);
+    }
+}
+
+fn do_u32_timestamp_compare_prop(s: u32, difference: u32) {
+    let (expected, inverse_expected) = match difference {
+        0 => (Some(Ordering::Equal), Some(Ordering::Equal)),
+        0x80000000 => (None, None),
+        other => {
+            let expected = other.cmp(&0x80000000u32);
+            (Some(expected.reverse()), Some(expected))
+        }
+    };
+    let t = s.wrapping_sub(difference);
+    assert_eq!(u32_paws_compare(s, t), expected);
+    assert_eq!(u32_paws_compare(t, s), inverse_expected);
+}
+
+fn do_u10_timestamp_compare_prop(s: u16, difference: u16) {
+    let (expected, inverse_expected) = match difference {
+        0 => (Some(Ordering::Equal), Some(Ordering::Equal)),
+        0x200 => (None, None),
+        other => {
+            let expected = other.cmp(&0x200);
+            (Some(expected.reverse()), Some(expected))
+        }
+    };
+    let s = u10::new(s);
+    let difference = u10::new(difference);
+    let t = s.wrapping_sub(difference);
+    assert_eq!(u10_paws_compare(s, t), expected);
+    assert_eq!(u10_paws_compare(t, s), inverse_expected);
 }

@@ -7,3 +7,7 @@ pub mod sockets;
 /// never seen a packet larger than 1688, but allocating the full 2048
 /// doesn't hurt _much_
 pub const WUP_VID_PACKET_BUFFER_SIZE: usize = 2048;
+
+/// The amount of time, according to dgram timestamps, after which a
+/// frame is considered no longer completeable.
+pub const STALE_FRAME_THRESHOLD: u32 = 16683 * 5; // 5 frames at ~16ms per frame

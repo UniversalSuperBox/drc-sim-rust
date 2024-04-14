@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fs::File,
     io::{BufReader, Read},
 };
 
 use drc_sim_rust_lib::{
-    incoming_packet_parser::{self, timestamp_compare},
+    incoming_packet_parser::{self, u32_paws_compare},
     packet_organizer::{self, FrameAccumulator},
-    WUP_VID_PACKET_BUFFER_SIZE,
+    STALE_FRAME_THRESHOLD, WUP_VID_PACKET_BUFFER_SIZE,
 };
 use log::{debug, error, info, trace};
 
@@ -22,7 +23,9 @@ fn main() -> std::io::Result<()> {
         let mut i = 0;
         let mut completed_frames = 0;
         let mut dropped_frames = 0;
-        let mut most_queued_frames = 0;
+
+        // The newest timestamp that we have seen so far.
+        let mut high_water_mark: Option<u32> = None;
 
         let mut frame_accumulators: HashMap<u32, packet_organizer::FrameAccumulator> =
             HashMap::new();
@@ -45,7 +48,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
 
-            let packet = match incoming_packet_parser::process_video_packet(buf) {
+            let packet = match incoming_packet_parser::process_video_packet(&buf) {
                 None => {
                     error!("Didn't get a packet back from process");
                     continue;
@@ -56,50 +59,44 @@ fn main() -> std::io::Result<()> {
             trace!("Packet {i}: {packet:?}");
 
             let timestamp = packet.timestamp;
-            // This implementation holds the current frame and up to two
-            // additional older frames under normal conditions. If
-            // conditions got really bad, it would allocate and promptly
-            // drop a very large number of frame accumulators.
-            // Additionally, it doesn't make much sense to hold frames
-            // from multiple seconds ago. It is very unlikely they will
-            // be completed. It may be better to calculate a window of
-            // acceptable values around the newest known frame, dropping
-            // all dgrams which fall outside the acceptable window to
-            // avoid that churn.
-            let num_accumulators = frame_accumulators.len();
-            if num_accumulators > most_queued_frames {
-                most_queued_frames = num_accumulators;
+
+            if high_water_mark == None {
+                high_water_mark = Some(timestamp);
             }
-            if num_accumulators > 2 {
-                let mut in_flight_accumulators: Vec<u32> =
-                    Vec::from_iter(frame_accumulators.keys().cloned());
-                in_flight_accumulators.sort_by(|a: &u32, b: &u32| timestamp_compare(*a, *b));
-                debug!("{:?}", in_flight_accumulators);
-                // also this might be an off-by-one error.
-                for _ in 0..(num_accumulators - 2) {
-                    let to_remove = match in_flight_accumulators.pop() {
-                        None => {
-                            error!(
-                                "Tried to remove a FrameAccumulator, but there are none to remove"
-                            );
-                            continue;
-                        }
-                        Some(a) => a,
-                    };
-                    if to_remove == timestamp {
-                        continue;
+
+            if u32_paws_compare(timestamp, high_water_mark.unwrap()) == Some(Ordering::Greater) {
+                debug!("New high water mark is {}", timestamp);
+                high_water_mark = Some(timestamp);
+            }
+
+            let mut accumulators_to_remove: Vec<u32> = Vec::new();
+            if frame_accumulators.len() > 1 {
+                for accu_timestamp in frame_accumulators.keys().cloned() {
+                    // This is "timestamp is less than our lowest acceptable timestamp"
+                    if u32_paws_compare(
+                        accu_timestamp,
+                        high_water_mark.unwrap() - STALE_FRAME_THRESHOLD,
+                    ) == Some(Ordering::Less)
+                    {
+                        accumulators_to_remove.push(accu_timestamp);
                     }
-                    info!("Dropping frame {}", to_remove);
-                    dropped_frames += 1;
-                    frame_accumulators.remove(&to_remove);
                 }
+            }
+            // I tried to avoid this separate loop by cloning the
+            // HashMap's keys and performing the removal inside the
+            // above loop, but the compiler always complained that I was
+            // trying to mutate the HashMap after requesting an
+            // immutable borrow of it at the declaration of the loop.
+            for to_remove in accumulators_to_remove {
+                dropped_frames += 1;
+                frame_accumulators.remove(&to_remove);
             }
 
             let frame_accumulator = frame_accumulators
                 .entry(timestamp)
                 .or_insert(FrameAccumulator::new(timestamp));
 
-            frame_accumulator.add_packet(packet);
+            let _ = frame_accumulator.add_packet(packet);
 
             let frame_dgrams = match frame_accumulator.complete() {
                 Some(data) => {
@@ -110,17 +107,16 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
             };
-            info!("Processed frame {:?}", frame_accumulator.timestamp);
+            info!("Processed frame {:?}", frame_accumulator.timestamp());
             debug!("{:?}", frame_dgrams);
 
             frame_accumulators.remove(&timestamp);
         }
         info!(
-            "{:?} frames were incomplete at time of exiting, completed {} dropped {}, had at most {} queued.",
+            "{:?} frames were incomplete at time of exiting, completed {} dropped {}.",
             frame_accumulators.len(),
             completed_frames,
             dropped_frames,
-            most_queued_frames,
         );
     }
     Ok(())
