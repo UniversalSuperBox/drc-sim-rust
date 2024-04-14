@@ -2,9 +2,11 @@ use std::{cmp::Ordering, panic::catch_unwind};
 
 use arbitrary_int::{u10, u11, u2, u4};
 use drc_sim_rust_lib::incoming_packet_parser::{
-    process_video_packet, u10_paws_compare, u32_paws_compare, WUPVideoPacket
+    process_video_packet, u10_paws_compare, u32_paws_compare, WUPVideoPacket,
 };
 use proptest::prelude::*;
+
+mod common;
 
 /** Converts a WUPVideoPacket into big-endian bytes as parsed by
 process_video_packet.
@@ -52,23 +54,6 @@ const ONES_SLICE: [u8; 17] = [
     0x01, // payload
 ];
 
-fn data_ones() -> WUPVideoPacket {
-    return WUPVideoPacket {
-        magic: u4::new(15),
-        packet_type: u2::new(0),
-        seq_id: u10::new(1),
-        init: false,
-        frame_begin: false,
-        chunk_end: false,
-        frame_end: false,
-        has_timestamp: true,
-        payload_size: u11::new(1),
-        timestamp: 1,
-        extended_header: 0u64.to_be_bytes(),
-        payload: Vec::from([0x1]),
-    };
-}
-
 const CHRISTMAS_TREE_SLICE: [u8; 17] = [
     0xF3, 0xFF, // magic, packet_type, seq_id
     0xF8, //init, frame_begin, chunk_end, frame_end, has_timestamp, first 3 of payload_size
@@ -98,7 +83,7 @@ fn data_christmas_tree() -> WUPVideoPacket {
 #[test]
 fn test_data_from_wupvideopacket_ones() {
     assert_eq!(
-        data_from_wupvideopacket(data_ones()).unwrap(),
+        data_from_wupvideopacket(common::data_ones()).unwrap(),
         [0xF0, 1, 8, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1]
     );
 }
@@ -121,12 +106,12 @@ fn christmas_tree_video_packet() {
 
 #[test]
 fn ones_video_packet() {
-    assert_eq!(process_video_packet(&ONES_SLICE), Some(data_ones()));
+    assert_eq!(process_video_packet(&ONES_SLICE), Some(common::data_ones()));
 }
 
 #[test]
 fn fail_with_invalid_magic() {
-    let mut packet = data_ones();
+    let mut packet = common::data_ones();
     packet.magic = u4::new(14);
     assert_eq!(
         process_video_packet(&data_from_wupvideopacket(packet).unwrap()),
@@ -152,7 +137,7 @@ proptest! {
 }
 
 fn do_first_bytes_test(magic: u8, packet_type: u8, seq_id: u16) {
-    let mut packet = data_ones();
+    let mut packet = common::data_ones();
     packet.magic = u4::new(magic);
     packet.packet_type = u2::new(packet_type);
     packet.seq_id = u10::new(seq_id);

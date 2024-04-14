@@ -88,6 +88,7 @@ fn main() -> std::io::Result<()> {
             // trying to mutate the HashMap after requesting an
             // immutable borrow of it at the declaration of the loop.
             for to_remove in accumulators_to_remove {
+                error!("Dropping {} as it is too old", to_remove);
                 dropped_frames += 1;
                 frame_accumulators.remove(&to_remove);
             }
@@ -103,14 +104,19 @@ fn main() -> std::io::Result<()> {
                     completed_frames += 1;
                     data
                 }
-                Err(IncompleteReason::TooManyPackets) => {
-                    error!("Frame accumulator has too many packets, dropping.");
-                    frame_accumulators.remove(&timestamp);
-                    continue;
+                Err(err) => {
+                    match err.kind {
+                        packet_organizer::IncompleteReasonKind::TooManyPackets => {
+                            error!("Frame accumulator has too many packets, dropping.");
+                            frame_accumulators.remove(&timestamp);
+                            dropped_frames += 1;
+                            continue;
+                        }
+                        // All other reasons will be handled by us
+                        // dropping old accumulators.
+                        _ => continue,
+                    }
                 }
-                // All other reasons will be handled by us dropping old
-                // accumulators.
-                _ => continue,
             };
             info!("Processed frame {:?}", frame_accumulator.timestamp());
             debug!("{:?}", frame_dgrams);
