@@ -10,7 +10,7 @@ use std::{
 
 use drc_sim_rust_lib::{
     incoming_packet_parser::{self, u32_paws_compare},
-    packet_organizer::{self, FrameAccumulator},
+    packet_organizer::{self, FrameAccumulator, IncompleteReason},
     STALE_FRAME_THRESHOLD, WUP_VID_PACKET_BUFFER_SIZE,
 };
 use log::{debug, error, info, trace};
@@ -99,13 +99,18 @@ fn main() -> std::io::Result<()> {
             let _ = frame_accumulator.add_packet(packet);
 
             let frame_dgrams = match frame_accumulator.complete() {
-                Some(data) => {
+                Ok(data) => {
                     completed_frames += 1;
                     data
                 }
-                None => {
+                Err(IncompleteReason::TooManyPackets) => {
+                    error!("Frame accumulator has too many packets, dropping.");
+                    frame_accumulators.remove(&timestamp);
                     continue;
                 }
+                // All other reasons will be handled by us dropping old
+                // accumulators.
+                _ => continue,
             };
             info!("Processed frame {:?}", frame_accumulator.timestamp());
             debug!("{:?}", frame_dgrams);

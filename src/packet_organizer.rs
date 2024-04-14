@@ -1,9 +1,9 @@
-use std::{collections::HashMap};
+use std::{cmp::Ordering, collections::HashMap};
 
 use arbitrary_int::{u10, Number};
-use log::{error, trace};
+use log::{debug, error, trace};
 
-use crate::incoming_packet_parser::{WUPVideoPacket};
+use crate::incoming_packet_parser::WUPVideoPacket;
 
 pub struct FrameAccumulator {
     timestamp_: u32,
@@ -25,6 +25,26 @@ pub enum PacketRejectReason {
     /// This FrameAccumulator already has a packet with that sequence
     /// ID.
     AlreadyHaveSeq,
+}
+
+pub enum IncompleteReason {
+    /// This FrameAccumulator does not have the begin or end packet.
+    NoBeginEndPacket,
+    /// This FrameAccumulator hs the end packet, but not the begin
+    /// packet.
+    NoBeginPacket,
+    /// This FrameAccumulator has the begin packet, but not the end
+    /// packet.
+    NoEndPacket,
+    /// This FrameAccumulator has the begin and end packet, but not
+    /// enough packets in between.
+    TooFewPackets,
+    /// This FrameAccumulator has more packets than it expected.
+    TooManyPackets,
+    /// This FrameAccumulator has the begin and end packet, but one or
+    /// more of the seq_ids between the begin and end packet is missing
+    /// (meaning we've received a packet outside the range)
+    Corrupt,
 }
 
 impl FrameAccumulator {
@@ -77,9 +97,13 @@ impl FrameAccumulator {
         return Ok(());
     }
 
-    pub fn complete(&self) -> Option<Vec<&WUPVideoPacket>> {
-        if self.begin_packet_ == None || self.end_packet_ == None {
-            return None;
+    pub fn complete(&self) -> Result<Vec<&WUPVideoPacket>, IncompleteReason> {
+        if self.begin_packet_ == None && self.end_packet_ == None {
+            return Err(IncompleteReason::NoBeginEndPacket);
+        } else if self.begin_packet_ == None {
+            return Err(IncompleteReason::NoBeginPacket);
+        } else if self.end_packet_ == None {
+            return Err(IncompleteReason::NoEndPacket);
         }
 
         let begin_packet: u16 = self.begin_packet_.unwrap().into();
@@ -92,9 +116,23 @@ impl FrameAccumulator {
         let expected_num_packets = (end_packet_absolute + 1) - begin_packet;
 
         let have_packets = self.packets.len();
+        match have_packets.cmp(&expected_num_packets.into()) {
+            std::cmp::Ordering::Equal => (),
+            comparison => {
+                debug!("Have {} dgrams want {}", have_packets, expected_num_packets);
+                if comparison == Ordering::Less {
+                    return Err(IncompleteReason::TooFewPackets);
+                }
+                error!(
+                    "Frame with timestamp {} has too many packets and should be dropped.",
+                    self.timestamp_
+                );
+                return Err(IncompleteReason::TooManyPackets);
+            }
+        }
         if have_packets != expected_num_packets.into() {
             trace!("Have {} dgrams want {}", have_packets, expected_num_packets);
-            return None;
+            return Err(IncompleteReason::TooFewPackets);
         }
 
         // We have the correct number of packets, but do we have the
@@ -108,13 +146,13 @@ impl FrameAccumulator {
                         "FrameAccumulator has correct number of packets but is missing packet {}",
                         wrapped_i
                     );
-                    return None;
+                    return Err(IncompleteReason::Corrupt);
                 }
                 Some(p) => p,
             };
             sorted_packets.push(packet);
         }
 
-        return Some(sorted_packets);
+        return Ok(sorted_packets);
     }
 }
